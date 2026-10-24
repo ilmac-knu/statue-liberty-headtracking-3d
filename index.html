@@ -95,6 +95,8 @@ ring.rotation.x=Math.PI/2;ring.position.set(0,-.273,-.17);root.add(ring);
 const gltf=new GLTFLoader();
 let modelReady=false,tracking=false,stream=null,detector=null,timer=null;
 let targetX=0,targetY=0,eyeX=0,eyeY=0;
+// 첫 인식 얼굴을 기준점으로 사용해 '시작 버튼' 자체로 인한 화면 점프를 방지합니다.
+let faceOrigin=null,faceDeltaX=0,faceDeltaY=0,hasMoved=false;
 const eyeZ=1.2; // 가상 눈에서 화면까지 거리
 let faceSeen=0, framesSent=0, framesReturned=0, lastError="", nativeDetector=null, busy=false;
 // 얼굴 추적 디버깅 좌표 UI는 v9에서 제거했습니다.
@@ -132,7 +134,7 @@ gltf.load('./statue_of_liberty_1.glb',g=>{
  wrapper.add(obj);root.add(wrapper);
  applyMode();
  modelReady=true;start.disabled=false;
- status.textContent='준비 완료. 정면 방향을 맞춘 뒤 얼굴 추적을 시작하세요.';
+ status.textContent='v11 준비 완료. 얼굴 추적 시작 직후에는 창틀 안에 유지되고, 머리를 움직일 때 돌출됩니다.';
 },undefined,e=>{
  console.error(e);status.textContent='모델을 불러오지 못했습니다. statue_of_liberty_1.glb 파일이 같은 폴더에 있는지 확인하세요.';
 });
@@ -158,14 +160,28 @@ stage.addEventListener('pointermove',e=>{
 });
 stage.addEventListener('pointerup',()=>drag=false);
 stage.addEventListener('pointercancel',()=>drag=false);
-reset.addEventListener('click',()=>{targetX=targetY=0;eyeX=eyeY=0;status.textContent=tracking?'얼굴 추적 중입니다. 머리를 좌우로 움직여 보세요.':'시점을 초기화했습니다. 마우스 드래그로 시점을 바꿔 보세요.';});
+reset.addEventListener('click',()=>{targetX=targetY=0;eyeX=eyeY=0;faceOrigin=null;faceDeltaX=faceDeltaY=0;hasMoved=false;status.textContent=tracking?'얼굴 추적 중입니다. 머리를 좌우로 움직여 보세요.':'시점을 초기화했습니다. 마우스 드래그로 시점을 바꿔 보세요.';});
 function applyFace(p){
  const px=p.x,py=p.y;
- targetX=clamp((.5-px)*2.0,-.65,.65);
- targetY=clamp((.5-py)*1.15,-.38,.38);
+ // 최초 검출 좌표를 기준으로 잡아 클릭 직후에는 움직임을 0으로 취급합니다.
+ if(!faceOrigin){
+  faceOrigin={x:px,y:py};
+  faceDeltaX=faceDeltaY=0;
+  targetX=targetY=0;
+  eyeX=eyeY=0;
+  hasMoved=false;
+  status.textContent='얼굴 기준 위치를 설정했습니다. 이제 머리를 좌우·상하로 움직여 보세요.';
+ }
+ const dx=px-faceOrigin.x,dy=py-faceOrigin.y;
+ // 미세한 얼굴 인식 떨림은 무시합니다. 3% 이상 실제 이동 시 반응합니다.
+ const deadZone=.03;
+ const filteredX=Math.sign(dx)*Math.max(0,Math.abs(dx)-deadZone);
+ const filteredY=Math.sign(dy)*Math.max(0,Math.abs(dy)-deadZone);
+ faceDeltaX=filteredX;faceDeltaY=filteredY;
+ hasMoved=Math.hypot(filteredX,filteredY)>.012;
+ targetX=clamp(-filteredX*2.0,-.55,.55);
+ targetY=clamp(-filteredY*1.15,-.34,.34);
  faceSeen++;
- 
- if(faceSeen===1)status.textContent='얼굴 추적 중입니다. 머리를 좌우·상하로 움직여 횃불의 돌출감을 확인하세요.';
 }
 async function detectionLoop(){
  if(!tracking)return;
@@ -202,6 +218,7 @@ start.onclick=async()=>{
    baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',delegate:'CPU'},
    runningMode:'VIDEO',minDetectionConfidence:.45
   });
+  faceOrigin=null;faceDeltaX=faceDeltaY=0;hasMoved=false;targetX=targetY=eyeX=eyeY=0;
   tracking=true;start.style.display='none';stop.style.display='inline-block';
   status.textContent='얼굴 인식 엔진 준비 완료. 얼굴을 찾고 있습니다…';
   detectionLoop();
@@ -217,7 +234,7 @@ function stopTracking(preserveError=false){
  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
  video.pause();video.srcObject=null;video.style.display='none';
  start.style.display='inline-block';stop.style.display='none';start.disabled=!modelReady;
- targetX=targetY=0;
+ targetX=targetY=0;faceOrigin=null;faceDeltaX=faceDeltaY=0;hasMoved=false;
  
  framesSent=framesReturned=0;
 }
@@ -232,7 +249,9 @@ function draw(){
  root.rotation.x=-eyeY*.13;
  // 얼굴 위치 변화량으로 돌출 효과를 자동 조절합니다. 슬라이더와 모드 버튼은 사용하지 않습니다.
  // 기본 구도는 창틀 안에 두고 얼굴 움직임에 따라 시차를 연출합니다.
- const faceMotion=tracking?clamp(Math.hypot(eyeX,eyeY)/.62,0,1):0;
+ // 절대 얼굴 위치가 아니라 시작 후 상대 이동량만으로 돌출을 발생시킵니다.
+ const faceMotion=(tracking && faceOrigin && hasMoved)
+  ?clamp(Math.hypot(faceDeltaX,faceDeltaY)/.22,0,1):0;
  const desiredZ=.015+.13*faceMotion;
  root.position.z+=(desiredZ-root.position.z)*.08;
  // 횃불은 창틀 위쪽 안으로, 받침은 창틀 아래쪽 선 가까이 배치합니다.
