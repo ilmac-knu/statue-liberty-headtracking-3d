@@ -24,7 +24,7 @@ button.selected{outline:2px solid #7cf9cf;box-shadow:0 0 16px #03e1b266}
 #portal:before{content:"";position:absolute;inset:0;border:10px solid #07101e8c;box-shadow:inset 0 0 35px #03101c}
 #portal.normal{opacity:.3;transform:none}
 #floor{position:fixed;left:0;right:0;bottom:0;height:32%;pointer-events:none;z-index:1;opacity:.5;background:linear-gradient(0deg,#061d38bb,transparent),repeating-linear-gradient(90deg,transparent 0 12%,#1686bd55 calc(12% + 1px),transparent calc(12% + 2px) 24%);clip-path:polygon(0 100%,100% 100%,72% 0,28% 0)}
-#torchGlow{position:fixed;width:180px;height:180px;left:25%;top:14%;border-radius:50%;background:radial-gradient(circle,#fff1b47a 0%,#ffa50055 17%,#ff7b0020 43%,transparent 70%);filter:blur(9px);mix-blend-mode:screen;pointer-events:none;z-index:3}
+#torchGlow{position:fixed;width:180px;height:180px;left:47%;top:17%;border-radius:50%;background:radial-gradient(circle,#fff1b47a 0%,#ffa50055 17%,#ff7b0020 43%,transparent 70%);filter:blur(9px);mix-blend-mode:screen;pointer-events:none;z-index:3}
 @media(max-width:700px){#portal{inset:24% 10% 24%;border-width:3px}#actions{bottom:calc(38px + env(safe-area-inset-bottom))}button{font-size:11px;padding:9px}#depth{width:75px}#torchGlow{width:110px;height:110px}}
 #stop{display:none}
 #video{position:fixed;right:12px;top:105px;width:105px;max-width:24vw;aspect-ratio:4/3;object-fit:cover;transform:scaleX(-1);border:1px solid #67d6e6;border-radius:8px;z-index:4;display:none;opacity:.75}
@@ -40,7 +40,7 @@ button.selected{outline:2px solid #7cf9cf;box-shadow:0 0 16px #03e1b266}
 <div id="hud"><h1>🗽 자유의 여신상 | 헤드 트래킹 3D 돌출 착시</h1><div id="status">3D 모델을 불러오는 중입니다…</div></div>
 <div id="badge">3D 모델: tech.service.allwe · CC BY 4.0</div>
 <video id="video" autoplay muted playsinline></video>
-<div id="actions"><button id="start" disabled>📷 얼굴 추적 시작</button><button id="stop">■ 얼굴 추적 종료</button><button id="reset">시점 초기화</button><button id="pop" class="selected">▣ 돌출 착시 모드</button><button id="normal">◉ 일반 3D 모드</button><label id="depthControl">돌출 정도 <input id="depth" type="range" min="0" max="100" value="75"><span id="depthValue">75</span></label></div>
+<div id="actions"><button id="start" disabled>📷 얼굴 추적 시작</button><button id="stop">■ 얼굴 추적 종료</button><button id="reset">시점 초기화</button><button id="pop" class="selected">▣ 돌출 착시 모드</button><button id="normal">◉ 일반 3D 모드</button><label id="depthControl">돌출 정도 <input id="depth" type="range" min="0" max="100" value="65"><span id="depthValue">65</span></label></div>
 <div id="footer">실제 화면 밖 투영이 아닌 3D 원근·가상 창틀·얼굴 추적을 결합한 돌출 착시 시뮬레이션입니다.</div>
 <div id="hint"></div>
 <script type="module">
@@ -51,7 +51,7 @@ const VISION_VERSION='0.10.14';
 const $=id=>document.getElementById(id);
 const stage=$('stage'),status=$('status'),start=$('start'),stop=$('stop'),reset=$('reset'),video=$('video');
 const pop=$('pop'),normal=$('normal'),depth=$('depth'),depthValue=$('depthValue'),portal=$('portal'),torchGlow=$('torchGlow');
-let popMode=true,depthAmount=.75,wrapper=null;
+let popMode=true,depthAmount=.65,wrapper=null;
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x07101e);
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
@@ -102,12 +102,13 @@ const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
 
 function applyMode(){
  if(!wrapper)return;
- // v5의 정상 작동하는 얼굴 추적 코드는 그대로 두고 모델 연출만 전환합니다.
- // 여신상 자체를 기울여 횃불이 관람자를 향하도록 배치합니다.
+ // v7: 모델을 과도하게 기울이거나 확대하지 않습니다.
+ // 횃불이 항상 프레임 안에 남도록 높이 기준 최대 0.84로 제한합니다.
  if(popMode){
-  wrapper.scale.setScalar((.92+depthAmount*.27)/modelHeight);
-  wrapper.rotation.set(-.12-depthAmount*.32,-.40-depthAmount*.22,-.23-depthAmount*.12);
-  wrapper.position.set(.04,-.39,-.12+depthAmount*.13);
+  const t=depthAmount;
+  wrapper.scale.setScalar((.68+.16*t)/modelHeight);
+  wrapper.rotation.set(-.04-.08*t,-.10-.17*t,-.02-.035*t);
+  wrapper.position.set(-.03,-.34,-.15+.12*t);
  }else{
   wrapper.scale.setScalar(.66/modelHeight);
   wrapper.rotation.set(0,0,0);
@@ -117,8 +118,9 @@ function applyMode(){
  torchGlow.style.display=popMode?'block':'none';
  pop.classList.toggle('selected',popMode);normal.classList.toggle('selected',!popMode);
 }
+
 let modelHeight=1;
-pop.onclick=()=>{popMode=true;applyMode();status.textContent='돌출 착시 모드: 횃불이 가상 창틀 앞으로 나오는 구도입니다.';};
+pop.onclick=()=>{popMode=true;applyMode();status.textContent='돌출 착시 모드: 횃불이 잘리지 않도록 구도를 보정했습니다. 돌출 정도를 조절해 보세요.';};
 normal.onclick=()=>{popMode=false;applyMode();status.textContent='일반 3D 모드: 자유의 여신상 전체를 감상합니다.';};
 depth.oninput=()=>{depthAmount=Number(depth.value)/100;depthValue.textContent=depth.value;applyMode();};
 
@@ -134,7 +136,7 @@ gltf.load('./statue_of_liberty_1.glb',g=>{
  wrapper.add(obj);root.add(wrapper);
  applyMode();
  modelReady=true;start.disabled=false;
- status.textContent='돌출 착시 준비 완료. 얼굴 추적을 시작하거나 마우스로 시점을 움직여 보세요.';
+ status.textContent='v7 구도 보정 완료. 횃불이 보이는지 확인하고 얼굴 추적을 시작해 보세요.';
 },undefined,e=>{
  console.error(e);status.textContent='모델을 불러오지 못했습니다. statue_of_liberty_1.glb 파일이 같은 폴더에 있는지 확인하세요.';
 });
@@ -233,7 +235,7 @@ function draw(){
  root.rotation.y=eyeX*.65;
  root.rotation.x=-eyeY*.42;
  // 횃불 빛무리 위치는 화면 좌표에 따라 자연스럽게 조금 이동합니다.
- if(popMode){torchGlow.style.left=(26-eyeX*17)+"%";torchGlow.style.top=(12+eyeY*15)+"%";}
+ if(popMode){torchGlow.style.left=(47-eyeX*12)+"%";torchGlow.style.top=(17+eyeY*12)+"%";}
  updatePerspective();
  ring.rotation.z+=.003;
  renderer.render(scene,camera);
