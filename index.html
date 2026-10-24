@@ -134,7 +134,7 @@ gltf.load('./statue_of_liberty_1.glb',g=>{
  wrapper.add(obj);root.add(wrapper);
  applyMode();
  modelReady=true;start.disabled=false;
- status.textContent='v11 준비 완료. 얼굴 추적 시작 직후에는 창틀 안에 유지되고, 머리를 움직일 때 돌출됩니다.';
+ status.textContent='v12 준비 완료. 얼굴을 위로 움직이면 횃불이 돌출되고, 좌우 이동은 보는 사람 기준으로 반응합니다.';
 },undefined,e=>{
  console.error(e);status.textContent='모델을 불러오지 못했습니다. statue_of_liberty_1.glb 파일이 같은 폴더에 있는지 확인하세요.';
 });
@@ -179,7 +179,8 @@ function applyFace(p){
  const filteredY=Math.sign(dy)*Math.max(0,Math.abs(dy)-deadZone);
  faceDeltaX=filteredX;faceDeltaY=filteredY;
  hasMoved=Math.hypot(filteredX,filteredY)>.012;
- targetX=clamp(-filteredX*2.0,-.55,.55);
+ // 전면 카메라 영상의 X좌표 증가 방향을 화면 오른쪽으로 통일합니다.
+ targetX=clamp(filteredX*2.0,-.55,.55);
  targetY=clamp(-filteredY*1.15,-.34,.34);
  faceSeen++;
 }
@@ -250,12 +251,18 @@ function draw(){
  // 얼굴 위치 변화량으로 돌출 효과를 자동 조절합니다. 슬라이더와 모드 버튼은 사용하지 않습니다.
  // 기본 구도는 창틀 안에 두고 얼굴 움직임에 따라 시차를 연출합니다.
  // 절대 얼굴 위치가 아니라 시작 후 상대 이동량만으로 돌출을 발생시킵니다.
- const faceMotion=(tracking && faceOrigin && hasMoved)
-  ?clamp(Math.hypot(faceDeltaX,faceDeltaY)/.22,0,1):0;
- const desiredZ=.015+.13*faceMotion;
+ // 카메라 좌표에서 위쪽 이동은 Y가 감소(음수)합니다.
+ // 위로 이동할 때만 앞으로 돌출하고, 아래로 이동하면 창 안쪽으로 복귀합니다.
+ const upwardMotion=(tracking && faceOrigin && hasMoved)
+  ?clamp(-faceDeltaY/.18,0,1):0;
+ const downwardMotion=(tracking && faceOrigin && hasMoved)
+  ?clamp(faceDeltaY/.18,0,1):0;
+ const desiredZ=.015+.18*upwardMotion-.045*downwardMotion;
  root.position.z+=(desiredZ-root.position.z)*.08;
  // 횃불은 창틀 위쪽 안으로, 받침은 창틀 아래쪽 선 가까이 배치합니다.
- root.position.y+=(-.09-root.position.y)*.08;
+ // 돌출 중 횃불이 상단 경계를 넘어가는 느낌을 강조합니다.
+ // 아래로 움직일 때는 받침대의 초기 정렬을 유지합니다.
+ root.position.y+=(-.09+.065*upwardMotion-root.position.y)*.08;
  root.rotation.z+=(0-root.rotation.z)*.10;
  torchGlow.style.left=(49-eyeX*12)+"%";torchGlow.style.top=(20+eyeY*12)+"%";
  updatePerspective();
