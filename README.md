@@ -59,3 +59,8 @@ Three.js · MediaPipe Face Detection · WebGL · getUserMedia
 - `인식 오류 ...`: 얼굴 인식 라이브러리 또는 모델 로딩 문제입니다. 오류 문구를 알려 주세요.
 
 일부 브라우저는 내장 FaceDetector를 사용하고, 그 외에는 MediaPipe를 사용합니다.
+
+
+## v4 변경 사항
+
+기존 MediaPipe Face Detection의 `Aborted(native code called abort())` 오류를 우회하기 위해 **MediaPipe Tasks Vision FaceDetector (CPU, VIDEO 모드)** 로 얼굴 인식 엔진을 교체했습니다. 웹 브라우저에서 실행 결과를 확인해야 하며, 사용 기기에서의 정상 작동을 보장하지는 않습니다. 카메라 연결 후 오른쪽 좌표창에 X·Y가 표시되는지 확인하세요.

@@ -21,7 +21,7 @@ button:disabled{opacity:.5}
 #footer{position:fixed;bottom:calc(3px + env(safe-area-inset-bottom));left:6px;right:6px;text-align:center;font-size:10px;color:#91b4c2;pointer-events:none;z-index:4}
 #hint{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:18px 22px;border:1px solid #4f90a9;background:#081b2de8;border-radius:12px;z-index:6;display:none;text-align:center}
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4/face_detection.js" crossorigin="anonymous"></script>
+
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"}}</script>
 </head>
 <body>
@@ -35,6 +35,7 @@ button:disabled{opacity:.5}
 <script type="module">
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {FaceDetector as MPFaceDetector, FilesetResolver} from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm';
 const $=id=>document.getElementById(id);
 const stage=$('stage'),status=$('status'),start=$('start'),stop=$('stop'),reset=$('reset'),video=$('video');
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x07101e);
@@ -123,89 +124,66 @@ stage.addEventListener('pointermove',e=>{
 stage.addEventListener('pointerup',()=>drag=false);
 stage.addEventListener('pointercancel',()=>drag=false);
 reset.addEventListener('click',()=>{targetX=targetY=0;eyeX=eyeY=0;status.textContent=tracking?'얼굴 추적 중입니다. 머리를 좌우로 움직여 보세요.':'시점을 초기화했습니다. 마우스 드래그로 시점을 바꿔 보세요.';});
-function getCenter(result){
- const det=result?.detections?.[0];if(!det)return null;
- const b=det.boundingBox || det.locationData?.relativeBoundingBox;
- if(b&&Number.isFinite(b.xCenter))return {x:b.xCenter,y:b.yCenter};
- if(b&&Number.isFinite(b.xmin))return {x:b.xmin+b.width/2,y:b.ymin+b.height/2};
- const kp=det.landmarks?.[0]||det.locationData?.relativeKeypoints?.[0];
- if(kp)return {x:kp.x,y:kp.y};
- return null;
-}
 function applyFace(p){
- if(!p)return;
- const px=p.x>1?p.x/video.videoWidth:p.x,py=p.y>1?p.y/video.videoHeight:p.y;
+ const px=p.x,py=p.y;
  targetX=clamp((.5-px)*2.0,-.65,.65);
  targetY=clamp((.5-py)*1.15,-.38,.38);
  faceSeen++;
  faceReadout.textContent=`얼굴 감지 ${faceSeen}회 | x=${px.toFixed(2)} y=${py.toFixed(2)} | 시점 X=${targetX.toFixed(2)} Y=${targetY.toFixed(2)}`;
- status.textContent='얼굴 좌표가 인식되었습니다. 머리를 움직여 시점 변화를 확인하세요.';
+ status.textContent='얼굴 좌표 인식 성공. 머리를 좌우·상하로 움직여 보세요.';
 }
 async function detectionLoop(){
- if(!tracking||busy)return;
- if(video.readyState<2){timer=setTimeout(detectionLoop,250);return;}
- busy=true;framesSent++;
- faceReadout.textContent=`분석 중… 요청 ${framesSent}회 / 결과 ${framesReturned}회`;
+ if(!tracking)return;
+ if(video.readyState<2){timer=setTimeout(detectionLoop,200);return;}
+ framesSent++;
  try{
-  if(nativeDetector){
-   const faces=await nativeDetector.detect(video);
-   framesReturned++;
-   if(faces.length){const b=faces[0].boundingBox;applyFace({x:(b.x+b.width/2)/video.videoWidth,y:(b.y+b.height/2)/video.videoHeight});}
-   else faceReadout.textContent=`얼굴 미검출 · 분석 ${framesReturned}회`;
-  }else if(detector){
-   // MediaPipe send가 모델 로딩 문제로 멈추는지 확인하기 위해 제한 시간을 둡니다.
-   await Promise.race([detector.send({image:video}),new Promise((_,reject)=>setTimeout(()=>reject(Error('얼굴 인식 엔진 응답 시간 초과 (8초)')),8000))]);
-  }
+  const result=detector.detectForVideo(video,performance.now());
+  framesReturned++;
+  const d=result.detections?.[0];
+  if(d){
+   const b=d.boundingBox;
+   applyFace({x:(b.originX+b.width/2)/video.videoWidth,y:(b.originY+b.height/2)/video.videoHeight});
+  }else faceReadout.textContent=`얼굴 미검출 · 분석 ${framesReturned}회`;
  }catch(e){
   lastError=e.message||String(e);
-  console.error('Face detection:',e);
   faceReadout.textContent='인식 오류: '+lastError;
-  status.textContent='카메라는 켜졌지만 얼굴 인식 엔진에서 오류가 발생했습니다. 오른쪽 메시지를 확인하세요.';
-  if(lastError.includes('시간 초과')){busy=false;tracking=false;return;}
+  status.textContent='얼굴 인식 엔진 오류. 오른쪽 메시지를 확인하세요.';
+  console.error(e);
+  stopTracking(true);return;
  }
- busy=false;
- if(tracking)timer=setTimeout(detectionLoop,160);
+ if(tracking)timer=setTimeout(detectionLoop,130);
 }
 start.onclick=async()=>{
  if(!modelReady)return;
- if(!navigator.mediaDevices?.getUserMedia){
-  status.textContent='카메라 API를 사용할 수 없습니다. HTTPS 주소와 브라우저를 확인하세요.';return;
- }
+ if(!navigator.mediaDevices?.getUserMedia){status.textContent='HTTPS 환경과 카메라 권한을 확인하세요.';return;}
  start.disabled=true;status.textContent='전면 카메라를 연결하는 중입니다…';
  try{
   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});
   video.srcObject=stream;await video.play();video.style.display='block';
-  if(typeof window.FaceDetector==='function'){
-   nativeDetector=new window.FaceDetector({fastMode:true,maxDetectedFaces:1});
-   faceReadout.textContent='브라우저 내장 얼굴 인식 엔진 준비 완료';
-  }else{
-   if(typeof window.FaceDetection!=='function')throw Error('MediaPipe 라이브러리 로딩 실패');
-   detector=new window.FaceDetection({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4/'+f});
-   detector.setOptions({modelSelection:0,minDetectionConfidence:.5});
-   detector.onResults(results=>{
-    framesReturned++;
-   if(!tracking)return;
-   const p=getCenter(results);
-   if(p)applyFace(p);
-   else faceReadout.textContent=`얼굴 미검출 · 분석 ${framesReturned}회`;
-   });
-  }
+  faceReadout.textContent='새 얼굴 인식 엔진(MediaPipe Tasks) 로딩 중…';
+  const fileset=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
+  detector=await MPFaceDetector.createFromOptions(fileset,{
+   baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',delegate:'CPU'},
+   runningMode:'VIDEO',minDetectionConfidence:.45
+  });
   tracking=true;start.style.display='none';stop.style.display='inline-block';
-  status.textContent='카메라 연결 완료. 얼굴을 찾고 있습니다…';
+  status.textContent='얼굴 인식 엔진 준비 완료. 얼굴을 찾고 있습니다…';
   detectionLoop();
  }catch(e){
-  console.error(e);
-  status.textContent='카메라/얼굴 추적 시작 실패: '+(e.message||e.name)+' · 카메라 권한, HTTPS, 인터넷 연결을 확인하세요.';
-  stopTracking();
+  console.error(e);status.textContent='얼굴 인식 엔진 시작 실패: '+(e.message||String(e));
+  faceReadout.textContent='시작 오류: '+(e.message||String(e));
+  stopTracking(true);
  }
 };
-function stopTracking(){
- tracking=false;busy=false;clearTimeout(timer);timer=null;nativeDetector=null;
+function stopTracking(preserveError=false){
+ tracking=false;clearTimeout(timer);timer=null;
  if(detector){try{detector.close();}catch(e){}detector=null;}
  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
  video.pause();video.srcObject=null;video.style.display='none';
  start.style.display='inline-block';stop.style.display='none';start.disabled=!modelReady;
- targetX=targetY=0;faceReadout.textContent='얼굴 좌표: 추적 종료';framesSent=framesReturned=0;
+ targetX=targetY=0;
+ if(!preserveError)faceReadout.textContent='얼굴 좌표: 추적 종료';
+ framesSent=framesReturned=0;
 }
 stop.onclick=()=>{stopTracking();status.textContent='얼굴 추적을 종료했습니다. 마우스 드래그로 시점을 바꿀 수 있습니다.';};
 function draw(){
