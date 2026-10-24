@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>자유의 여신상 | 헤드 트래킹 3D 돌출 착시</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#07101e;color:#eefaff;font-family:system-ui,"Malgun Gothic",sans-serif}
+#stage{position:fixed;inset:0;touch-action:none;cursor:grab}
+#stage:active{cursor:grabbing}
+#hud{position:fixed;top:0;left:0;right:0;padding:15px 16px 30px;background:linear-gradient(#07101ef0,#07101e00);pointer-events:none;z-index:3}
+h1{font-size:clamp(17px,4vw,25px);margin:0 0 7px}
+#status{font-size:clamp(12px,3vw,15px);color:#c3e8ef;line-height:1.5;max-width:850px}
+#actions{position:fixed;bottom:calc(24px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);display:flex;gap:8px;z-index:5;max-width:98vw}
+button{background:#134e68;color:white;border:1px solid #8ceaf5;border-radius:12px;padding:12px 15px;font-size:14px;font-weight:700;white-space:nowrap;cursor:pointer}
+button:disabled{opacity:.5}
+#start{background:#087b66}
+#stop{display:none}
+#video{position:fixed;right:12px;top:105px;width:105px;max-width:24vw;aspect-ratio:4/3;object-fit:cover;transform:scaleX(-1);border:1px solid #67d6e6;border-radius:8px;z-index:4;display:none;opacity:.75}
+#badge{position:fixed;right:12px;top:90px;color:#b1cdd9;font-size:10px;z-index:4}
+#footer{position:fixed;bottom:calc(3px + env(safe-area-inset-bottom));left:6px;right:6px;text-align:center;font-size:10px;color:#91b4c2;pointer-events:none;z-index:4}
+#hint{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);padding:18px 22px;border:1px solid #4f90a9;background:#081b2de8;border-radius:12px;z-index:6;display:none;text-align:center}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4/face_detection.js" crossorigin="anonymous"></script>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"}}</script>
+</head>
+<body>
+<div id="stage"></div>
+<div id="hud"><h1>🗽 자유의 여신상 | 헤드 트래킹 3D 돌출 착시</h1><div id="status">3D 모델을 불러오는 중입니다…</div></div>
+<div id="badge">3D 모델: tech.service.allwe · CC BY 4.0</div>
+<video id="video" autoplay muted playsinline></video>
+<div id="actions"><button id="start" disabled>📷 얼굴 추적 시작</button><button id="stop">■ 얼굴 추적 종료</button><button id="reset">시점 초기화</button></div>
+<div id="footer">실제 화면 밖 투영이 아닌 시점 추적 기반 원근 착시 · 스마트폰은 고정하고 머리를 움직여 보세요.</div>
+<div id="hint"></div>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+const $=id=>document.getElementById(id);
+const stage=$('stage'),status=$('status'),start=$('start'),stop=$('stop'),reset=$('reset'),video=$('video');
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x07101e);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+stage.appendChild(renderer.domElement);
+const camera=new THREE.PerspectiveCamera(40,innerWidth/innerHeight,.01,30);
+const light=new THREE.HemisphereLight(0xffffff,0x486b85,2.2);scene.add(light);
+const key=new THREE.DirectionalLight(0xffffff,2.5);key.position.set(-.6,1.2,1.8);scene.add(key);
+const rim=new THREE.DirectionalLight(0x54cfff,1.1);rim.position.set(.8,.6,-.6);scene.add(rim);
+
+// 화면을 '창'으로 간주: z=0이 창틀, z<0은 창 뒤, z>0은 창 앞.
+const root=new THREE.Group();scene.add(root);
+const windowFrame=new THREE.Group();scene.add(windowFrame);
+const frameMaterial=new THREE.MeshBasicMaterial({color:0x43d9e8,transparent:true,opacity:.65});
+const gridMaterial=new THREE.LineBasicMaterial({color:0x1c7b95,transparent:true,opacity:.33});
+const bar=(a,b)=>{const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a),new THREE.Vector3(...b)]);windowFrame.add(new THREE.Line(g,frameMaterial));};
+let screenH=.9,screenW=screenH*innerWidth/innerHeight;
+function rebuildFrame(){
+ while(windowFrame.children.length){const o=windowFrame.children[0];windowFrame.remove(o);o.geometry.dispose();}
+ screenW=screenH*innerWidth/innerHeight;
+ const x=screenW*.48,y=screenH*.46;
+ for(let i=0;i<4;i++){
+  const p=[[ -x,-y,0],[x,-y,0],[x,y,0],[-x,y,0]];
+  bar(p[i],p[(i+1)%4]);
+ }
+ // 창 뒤쪽 공간을 알려주는 얇은 선들
+ for(let z of [-.22,-.48]){
+  for(let i=0;i<=6;i++){
+   const xx=-x+2*x*i/6;
+   const g=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(xx,-y,z),new THREE.Vector3(xx,-y,0)]);
+   windowFrame.add(new THREE.Line(g,gridMaterial));
+  }
+ }
+}
+rebuildFrame();
+const plinth=new THREE.Mesh(new THREE.CylinderGeometry(.17,.19,.02,64),new THREE.MeshStandardMaterial({color:0x0d667c,emissive:0x043343,metalness:.5,roughness:.5}));
+plinth.position.set(0,-.355,-.17);root.add(plinth);
+const ring=new THREE.Mesh(new THREE.TorusGeometry(.18,.005,8,72),new THREE.MeshBasicMaterial({color:0x32d5ff}));
+ring.rotation.x=Math.PI/2;ring.position.set(0,-.342,-.17);root.add(ring);
+const gltf=new GLTFLoader();
+let modelReady=false,tracking=false,stream=null,detector=null,timer=null;
+let targetX=0,targetY=0,eyeX=0,eyeY=0;
+const eyeZ=1.2; // 가상 눈에서 화면까지 거리
+const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
+gltf.load('./statue_of_liberty_1.glb',g=>{
+ const obj=g.scene;
+ obj.updateMatrixWorld(true);
+ const bounds=new THREE.Box3().setFromObject(obj);
+ const sz=bounds.getSize(new THREE.Vector3()),mid=bounds.getCenter(new THREE.Vector3());
+ if(!sz.y||!Number.isFinite(sz.y)){status.textContent='모델 크기를 계산할 수 없습니다.';return;}
+ // 여신상 높이를 0.66m의 가상 단위로 정규화
+ obj.position.set(-mid.x,-bounds.min.y,-mid.z);
+ const wrapper=new THREE.Group();wrapper.scale.setScalar(.66/sz.y);
+ wrapper.add(obj);wrapper.position.set(0,-.34,-.17);
+ root.add(wrapper);
+ modelReady=true;start.disabled=false;
+ status.textContent='준비 완료. 「얼굴 추적 시작」을 누르고 카메라를 허용하세요. 카메라 없이도 마우스 드래그로 시점을 시험할 수 있습니다.';
+},undefined,e=>{
+ console.error(e);status.textContent='모델을 불러오지 못했습니다. statue_of_liberty_1.glb 파일이 같은 폴더에 있는지 확인하세요.';
+});
+function updatePerspective(){
+ // 비대칭 원근 투영: 실제 눈의 위치에서 고정된 창(z=0)을 보는 방식
+ const near=.03;
+ const left=(-screenW/2-eyeX)*near/eyeZ;
+ const right=(screenW/2-eyeX)*near/eyeZ;
+ const bottom=(-screenH/2-eyeY)*near/eyeZ;
+ const top=(screenH/2-eyeY)*near/eyeZ;
+ camera.position.set(eyeX,eyeY,eyeZ);
+ camera.rotation.set(0,0,0);
+ camera.projectionMatrix.makePerspective(left,right,top,bottom,near,30);
+ camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+}
+let drag=false,lastX=0,lastY=0;
+stage.addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;lastY=e.clientY;stage.setPointerCapture(e.pointerId);});
+stage.addEventListener('pointermove',e=>{
+ if(!drag||tracking)return;
+ targetX=clamp(targetX+(e.clientX-lastX)/innerWidth*.9,-.48,.48);
+ targetY=clamp(targetY-(e.clientY-lastY)/innerHeight*.55,-.3,.3);
+ lastX=e.clientX;lastY=e.clientY;
+});
+stage.addEventListener('pointerup',()=>drag=false);
+stage.addEventListener('pointercancel',()=>drag=false);
+reset.addEventListener('click',()=>{targetX=targetY=0;eyeX=eyeY=0;status.textContent=tracking?'얼굴 추적 중입니다. 머리를 좌우로 움직여 보세요.':'시점을 초기화했습니다. 마우스 드래그로 시점을 바꿔 보세요.';});
+function getCenter(result){
+ const det=result?.detections?.[0];if(!det)return null;
+ const b=det.boundingBox;
+ if(b&&Number.isFinite(b.xCenter))return {x:b.xCenter,y:b.yCenter};
+ const kp=det.landmarks?.[0]||det.locationData?.relativeKeypoints?.[0];
+ if(kp)return {x:kp.x,y:kp.y};
+ return null;
+}
+async function detectionLoop(){
+ if(!tracking||!detector)return;
+ try{if(video.readyState>=2)await detector.send({image:video});}
+ catch(e){console.warn('얼굴 감지 오류',e);}
+ if(tracking)timer=setTimeout(detectionLoop,95);
+}
+start.onclick=async()=>{
+ if(!modelReady)return;
+ if(!navigator.mediaDevices?.getUserMedia){
+  status.textContent='카메라 API를 사용할 수 없습니다. HTTPS 주소와 브라우저를 확인하세요.';return;
+ }
+ start.disabled=true;status.textContent='전면 카메라를 연결하는 중입니다…';
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});
+  video.srcObject=stream;await video.play();video.style.display='block';
+  if(typeof window.FaceDetection!=='function')throw Error('MediaPipe 라이브러리 로딩 실패');
+  detector=new window.FaceDetection({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4/'+f});
+  detector.setOptions({modelSelection:0,minDetectionConfidence:.5});
+  detector.onResults(results=>{
+   if(!tracking)return;
+   const p=getCenter(results);
+   if(p){
+    // 전면 카메라 좌우 반전 방향에 맞춰 시점 추적.
+    targetX=clamp((.5-p.x)*1.05,-.46,.46);
+    targetY=clamp((.5-p.y)*.67,-.3,.3);
+    status.textContent='얼굴 추적 중 · 머리를 좌우·상하로 움직여 화면 속 시점 변화를 확인하세요.';
+   }else status.textContent='얼굴을 찾는 중입니다. 화면 정면에서 밝은 곳을 바라보세요.';
+  });
+  tracking=true;start.style.display='none';stop.style.display='inline-block';
+  status.textContent='카메라 연결 완료. 얼굴을 찾고 있습니다…';
+  detectionLoop();
+ }catch(e){
+  console.error(e);
+  status.textContent='카메라/얼굴 추적 시작 실패: '+(e.message||e.name)+' · 카메라 권한, HTTPS, 인터넷 연결을 확인하세요.';
+  stopTracking();
+ }
+};
+function stopTracking(){
+ tracking=false;clearTimeout(timer);timer=null;
+ if(detector){try{detector.close();}catch(e){}detector=null;}
+ if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+ video.pause();video.srcObject=null;video.style.display='none';
+ start.style.display='inline-block';stop.style.display='none';start.disabled=!modelReady;
+ targetX=targetY=0;
+}
+stop.onclick=()=>{stopTracking();status.textContent='얼굴 추적을 종료했습니다. 마우스 드래그로 시점을 바꿀 수 있습니다.';};
+function draw(){
+ requestAnimationFrame(draw);
+ eyeX+=(targetX-eyeX)*.14;
+ eyeY+=(targetY-eyeY)*.14;
+ updatePerspective();
+ ring.rotation.z+=.003;
+ renderer.render(scene,camera);
+}
+draw();
+addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);rebuildFrame();});
+addEventListener('pagehide',stopTracking);
+</script>
+</body>
+</html>
