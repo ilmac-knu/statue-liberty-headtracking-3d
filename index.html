@@ -35,7 +35,8 @@ button:disabled{opacity:.5}
 <script type="module">
 import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
-import {FaceDetector as MPFaceDetector, FilesetResolver} from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm';
+// 얼굴 인식 모듈은 시작 버튼을 누를 때만 동적으로 불러옵니다.
+const VISION_VERSION='0.10.14';
 const $=id=>document.getElementById(id);
 const stage=$('stage'),status=$('status'),start=$('start'),stop=$('stop'),reset=$('reset'),video=$('video');
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x07101e);
@@ -161,7 +162,8 @@ start.onclick=async()=>{
   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:480}},audio:false});
   video.srcObject=stream;await video.play();video.style.display='block';
   faceReadout.textContent='새 얼굴 인식 엔진(MediaPipe Tasks) 로딩 중…';
-  const fileset=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
+  const {FaceDetector: MPFaceDetector, FilesetResolver}=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+VISION_VERSION+'/+esm');
+  const fileset=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@'+VISION_VERSION+'/wasm');
   detector=await MPFaceDetector.createFromOptions(fileset,{
    baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',delegate:'CPU'},
    runningMode:'VIDEO',minDetectionConfidence:.45

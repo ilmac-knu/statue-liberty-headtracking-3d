@@ -64,3 +64,9 @@ Three.js · MediaPipe Face Detection · WebGL · getUserMedia
 ## v4 변경 사항
 
 기존 MediaPipe Face Detection의 `Aborted(native code called abort())` 오류를 우회하기 위해 **MediaPipe Tasks Vision FaceDetector (CPU, VIDEO 모드)** 로 얼굴 인식 엔진을 교체했습니다. 웹 브라우저에서 실행 결과를 확인해야 하며, 사용 기기에서의 정상 작동을 보장하지는 않습니다. 카메라 연결 후 오른쪽 좌표창에 X·Y가 표시되는지 확인하세요.
+
+
+## v5 수정 사항
+- MediaPipe Tasks Vision 참조 버전을 `0.10.14`로 변경했습니다.
+- 얼굴 인식 모듈을 동적 import하여 라이브러리 오류가 3D 모델 초기화를 막지 않도록 했습니다.
+- 라이브러리 CDN과 브라우저 환경에 따라 얼굴 추적 성공 여부는 달라질 수 있습니다.
